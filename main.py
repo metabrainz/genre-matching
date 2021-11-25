@@ -54,6 +54,8 @@ class ServiceGenre:
         self.processed_full_genre = self.processed_full_genre_words.replace(" ", "")
         if self.subgenre:
             self.lowercase_subgenre = self.subgenre.lower()
+        else:
+            self.lowercase_subgenre = None
 
 
 @dataclass(unsafe_hash=True)
@@ -114,25 +116,28 @@ def compare(genre_chunk: List[ServiceGenre], musicbrainz_genres: List[MusicBrain
     for genre in genre_chunk:
         matches = []
         for mbg in musicbrainz_genres:
-            if mbg.name.lower() == genre.lowercase_subgenre:
-                matches.append(
-                    MatchResult(musicbrainz=mbg, match=100, match_type=MatchType.EXACT)
-                )
             ratio = fuzz.ratio(mbg.processed_name, genre.processed_parent_genre)
             if ratio == 100:
                 matches.append(
                     MatchResult(musicbrainz=mbg, match=ratio, match_type=MatchType.PARENTGENRE)
                 )
-            ratio = fuzz.ratio(mbg.processed_name, genre.processed_full_genre)
-            if ratio == 100:
+            if mbg.name.lower() == genre.lowercase_subgenre:
                 matches.append(
-                    MatchResult(musicbrainz=mbg, match=ratio, match_type=MatchType.FULLGENRE)
+                    MatchResult(musicbrainz=mbg, match=100, match_type=MatchType.EXACT)
                 )
+                continue
             ratio = fuzz.ratio(mbg.processed_name, genre.processed_single_genre)
             if ratio == 100:
                 matches.append(
                     MatchResult(musicbrainz=mbg, match=ratio, match_type=MatchType.SUBGENRE)
                 )
+                continue
+            ratio = fuzz.ratio(mbg.processed_name, genre.processed_full_genre)
+            if ratio == 100:
+                matches.append(
+                    MatchResult(musicbrainz=mbg, match=ratio, match_type=MatchType.FULLGENRE)
+                )
+                continue
             ratio = fuzz.token_sort_ratio(mbg.processed_name_words, genre.processed_full_genre_words)
             if ratio == 100:
                 matches.append(
@@ -215,7 +220,7 @@ def main(genrefile, datafile, outfile=None):
 def get_ordered_list_of_matches(exactmatch: MatchResult, parentmatch: MatchResult, submatch: MatchResult, fullmatch: MatchResult, tokenmatch: MatchResult):
     ret = []
     if parentmatch and parentmatch.musicbrainz.is_genre:
-        ret.extend([parentmatch.musicbrainz.name, "", "parent"])
+        ret.extend([parentmatch.musicbrainz.name, "parent", ""])
     for match, mt in [(exactmatch, "exact"), (submatch, "subgenre"), (fullmatch, "full"), (tokenmatch, "unordered")]:
         if match and match.musicbrainz.is_genre:
             ret.extend([match.musicbrainz.name, mt, ""])
@@ -223,7 +228,7 @@ def get_ordered_list_of_matches(exactmatch: MatchResult, parentmatch: MatchResul
     # we didn't return early, no genre match in sub/full/token, so print them out
     for match, mt in [(exactmatch, "exact"), (submatch, "subgenre"), (fullmatch, "full"), (tokenmatch, "unordered")]:
         if match:
-            ret.extend([match.musicbrainz.name, mt, "" if match.musicbrainz.is_genre else "n",])
+            ret.extend([match.musicbrainz.name, mt, "" if match.musicbrainz.is_genre else "n"])
     return ret
 
 
