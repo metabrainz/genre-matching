@@ -2,22 +2,26 @@
 # all genres, deduplicate, and write out in sorted order.
 import argparse
 import csv
+import sys
+from collections import Counter
 
 
 def main(datafiles):
     data_genres = set()
     for f in datafiles:
-        data_genres = set()
+        data_genres = Counter()
         with open(f) as fp:
             r = csv.reader(fp, dialect=csv.excel_tab)
             next(r)
             for line in r:
                 for genre in line[2:]:
                     if genre:
-                        data_genres.add(genre)
+                        data_genres[genre] += 1
 
-    for genre in sorted(list(data_genres)):
-        print(genre)
+    writer = csv.DictWriter(sys.stdout, fieldnames=["genre", "count"])
+    writer.writeheader()
+    for genre, count in data_genres.items():
+        writer.writerow({"genre": genre, "count": count})
 
 
 if __name__ == '__main__':
