@@ -13,7 +13,6 @@ from thefuzz import utils
 
 
 class MatchType(Enum):
-    SUBGENRE = auto()
     FULLGENRE = auto()
     TOKENSORT = auto()
     PARENTGENRE = auto()
@@ -28,8 +27,6 @@ class ServiceGenre:
 
     # just the parent genre, a-z, no spaces
     processed_parent_genre: str = field(init=False)
-    # Either just the parent genre (if no subgenre), or just the subgenre. a-z, no spaces
-    processed_single_genre: str = field(init=False)
     # if parent + subgenre are set, the processed version of both. a-z, no spaces
     processed_full_genre: str = field(init=False)
     # same as above, but with spaces between words
@@ -46,10 +43,6 @@ class ServiceGenre:
 
     def __post_init__(self):
         self.processed_parent_genre = utils.full_process(self.parent_genre).replace(" ", "")
-        if self.subgenre is None:
-            self.processed_single_genre = utils.full_process(self.parent_genre).replace(" ", "")
-        else:
-            self.processed_single_genre = utils.full_process(self.subgenre).replace(" ", "")
         self.processed_full_genre_words = utils.full_process(self.full_genre)
         self.processed_full_genre = self.processed_full_genre_words.replace(" ", "")
         if self.subgenre:
@@ -87,7 +80,7 @@ class MatchResult:
 def chunks(l, n):
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(l), n):
-        yield l[i:i+n]
+        yield l[i:i + n]
 
 
 def threaded_match_genres(data_genres, musicbrainz_genres) -> Dict[ServiceGenre, List[MatchResult]]:
@@ -125,19 +118,11 @@ def compare(genre_chunk: List[ServiceGenre], musicbrainz_genres: List[MusicBrain
                 matches.append(
                     MatchResult(musicbrainz=mbg, match=100, match_type=MatchType.EXACT)
                 )
-                continue
-            ratio = fuzz.ratio(mbg.processed_name, genre.processed_single_genre)
-            if ratio == 100:
-                matches.append(
-                    MatchResult(musicbrainz=mbg, match=ratio, match_type=MatchType.SUBGENRE)
-                )
-                continue
             ratio = fuzz.ratio(mbg.processed_name, genre.processed_full_genre)
             if ratio == 100:
                 matches.append(
                     MatchResult(musicbrainz=mbg, match=ratio, match_type=MatchType.FULLGENRE)
                 )
-                continue
             ratio = fuzz.token_sort_ratio(mbg.processed_name_words, genre.processed_full_genre_words)
             if ratio == 100:
                 matches.append(
@@ -153,7 +138,9 @@ def main(genrefile, datafile, outfile=None):
     with open(genrefile) as fp:
         reader = csv.DictReader(fp)
         for line in list(reader):
-            mb_genres.append(MusicBrainzGenre(name=line["name"], is_genre=line["has_genre"] == 't', tag_count=line["ref_count"]))
+            mb_genres.append(
+                MusicBrainzGenre(name=line["name"], is_genre=line["has_genre"] == 't', tag_count=line["ref_count"])
+            )
 
     print(f"got {len(mb_genres)} genres")
 
@@ -167,14 +154,15 @@ def main(genrefile, datafile, outfile=None):
                 parent_genre, subgenre = genre.split('---')
             else:
                 parent_genre, subgenre = genre, None
-            data_genres.append(ServiceGenre(parent_genre=parent_genre, subgenre=subgenre, number_taggings=int(line["count"])))
+            data_genres.append(
+                ServiceGenre(parent_genre=parent_genre, subgenre=subgenre, number_taggings=int(line["count"])))
 
     print(f"got {len(data_genres)} items from the datafile")
 
     t = time.monotonic()
     genre_matches = threaded_match_genres(data_genres, mb_genres)
     e = time.monotonic()
-    print(e-t)
+    print(e - t)
 
     print(f"{len(genre_matches)} matches")
 
@@ -194,10 +182,9 @@ def main(genrefile, datafile, outfile=None):
 
         exactmatch = get_match_for_matchtype(matches, MatchType.EXACT)
         fullmatch = get_match_for_matchtype(matches, MatchType.FULLGENRE)
-        submatch = get_match_for_matchtype(matches, MatchType.SUBGENRE)
         parentmatch = get_match_for_matchtype(matches, MatchType.PARENTGENRE)
 
-        for match in [exactmatch, fullmatch, submatch, parentmatch]:
+        for match in [exactmatch, fullmatch, parentmatch]:
             if match:
                 if match.match == 100:
                     print(f"    {match.musicbrainz.name} g={match.musicbrainz.is_genre} t={match.match_type}")
@@ -206,27 +193,32 @@ def main(genrefile, datafile, outfile=None):
         tokenmatch = get_match_for_matchtype(matches, MatchType.TOKENSORT)
         if tokenmatch:
             if fullmatch is not None and tokenmatch.musicbrainz.name != fullmatch.musicbrainz.name and tokenmatch.match == 100:
-                print(f"    {tokenmatch.musicbrainz.name} g={tokenmatch.musicbrainz.is_genre} t={tokenmatch.match_type}")
+                print(
+                    f"    {tokenmatch.musicbrainz.name} g={tokenmatch.musicbrainz.is_genre} t={tokenmatch.match_type}")
 
         if w:
             sub = dataset_genre.subgenre
-            row = [dataset_genre.parent_genre, sub if sub else ""] + get_ordered_list_of_matches(exactmatch, parentmatch, submatch, fullmatch, tokenmatch)
+            row = [dataset_genre.parent_genre, sub if sub else ""] + get_ordered_list_of_matches(exactmatch,
+                                                                                                 parentmatch,
+                                                                                                 fullmatch, tokenmatch)
             w.writerow(row)
 
     if fp and outfile != "-":
         fp.close()
 
 
-def get_ordered_list_of_matches(exactmatch: MatchResult, parentmatch: MatchResult, submatch: MatchResult, fullmatch: MatchResult, tokenmatch: MatchResult):
+def get_ordered_list_of_matches(exactmatch: MatchResult, parentmatch: MatchResult,
+                                fullmatch: MatchResult, tokenmatch: MatchResult):
     ret = []
     if parentmatch and parentmatch.musicbrainz.is_genre:
         ret.extend([parentmatch.musicbrainz.name, "parent", ""])
-    for match, mt in [(exactmatch, "exact"), (submatch, "subgenre"), (fullmatch, "full"), (tokenmatch, "unordered")]:
+    # If we get a match _and_ it's a genre in musicbrainz, this looks like a pretty good candidate
+    for match, mt in [(exactmatch, "exact"), (fullmatch, "full"), (tokenmatch, "unordered")]:
         if match and match.musicbrainz.is_genre:
             ret.extend([match.musicbrainz.name, mt, ""])
             return ret
     # we didn't return early, no genre match in sub/full/token, so print them out
-    for match, mt in [(exactmatch, "exact"), (submatch, "subgenre"), (fullmatch, "full"), (tokenmatch, "unordered")]:
+    for match, mt in [(exactmatch, "exact"), (fullmatch, "full"), (tokenmatch, "unordered")]:
         if match:
             ret.extend([match.musicbrainz.name, mt, "" if match.musicbrainz.is_genre else "n"])
     return ret
