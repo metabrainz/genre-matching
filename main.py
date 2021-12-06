@@ -1,4 +1,5 @@
 import argparse
+import collections
 import csv
 import concurrent.futures
 import sys
@@ -14,12 +15,20 @@ from thefuzz import utils
 
 DEBUG = False
 
+
 class MatchType(Enum):
+    # genre + subgenre
     FULLGENRE = auto()
+    # genre + subgenre, but words can be in any order
     TOKENSORT = auto()
+    # only genre
     PARENTGENRE = auto()
+    # only subgenre
     SUBGENRE = auto()
+    # only subgenre, but exact match not fuzzy
     EXACT = auto()
+    # manual mapping
+    MANUAL = auto()
 
 
 @dataclass(unsafe_hash=True)
@@ -63,7 +72,7 @@ class MusicBrainzGenre:
     # is it marked as a genre, or just a tag
     is_genre: bool
     # tag.ref_count
-    tag_count: bool
+    tag_count: int
 
     # processed version of name, a-z, no spaces
     processed_name: str = field(init=False)
@@ -89,23 +98,24 @@ def chunks(l, n):
         yield l[i:i + n]
 
 
-def threaded_match_genres(data_genres, musicbrainz_genres) -> Dict[ServiceGenre, List[MatchResult]]:
-    num_workers = 8
+def threaded_match_genres(data_genres, musicbrainz_genres, manual_mapping) -> Dict[ServiceGenre, List[MatchResult]]:
+    num_workers = 12
     chunk_size = math.ceil(len(data_genres) / num_workers)
     genre_matches = {}
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = []
         for genre_chunk in chunks(data_genres, chunk_size):
-            futures.append(executor.submit(compare, genre_chunk, musicbrainz_genres))
+            futures.append(executor.submit(compare, genre_chunk, musicbrainz_genres, manual_mapping))
 
         for future in concurrent.futures.as_completed(futures):
             genre_matches.update(future.result())
     return genre_matches
 
 
-def compare(genre_chunk: List[ServiceGenre], musicbrainz_genres: List[MusicBrainzGenre]):
+def compare(genre_chunk: List[ServiceGenre], musicbrainz_genres: List[MusicBrainzGenre], manual_mapping):
     """
     Try and find a matching musicbrainz
+    :param manual_mapping:
     :param genre_chunk:
     :param musicbrainz_genres:
     :return: dict of {service_genre: list of (match ratio, mb tag)}
@@ -114,6 +124,13 @@ def compare(genre_chunk: List[ServiceGenre], musicbrainz_genres: List[MusicBrain
     ret = {}
     for genre in genre_chunk:
         matches = []
+        if genre.full_genre in manual_mapping:
+            # If we have a list of manual genres, just fill them in directly
+            for g in manual_mapping.get(genre.full_genre, []):
+                matches.append(MatchResult(musicbrainz=g, match=100, match_type=MatchType.MANUAL))
+            ret[genre] = matches
+            continue
+
         for mbg in musicbrainz_genres:
             if DEBUG:
                 if mbg.name == "abstract electronic" and genre.subgenre == "abstract":
@@ -151,14 +168,24 @@ def compare(genre_chunk: List[ServiceGenre], musicbrainz_genres: List[MusicBrain
     return ret
 
 
-def main(genrefile, datafile, outfile=None):
+def main(genrefile, datafile, mappingfile=None, outfile=None):
     mb_genres: List[MusicBrainzGenre] = []
     with open(genrefile) as fp:
         reader = csv.DictReader(fp)
         for line in list(reader):
-            mb_genres.append(
-                MusicBrainzGenre(name=line["name"], is_genre=line["has_genre"] == 't', tag_count=line["ref_count"])
-            )
+            mbg = MusicBrainzGenre(name=line["name"], is_genre=line["has_genre"] == 't', tag_count=line["ref_count"])
+            mb_genres.append(mbg)
+
+
+    manual_mapping = collections.defaultdict(list)
+    if mappingfile:
+        with open(mappingfile) as fp:
+            r = csv.reader(fp)
+            for line in r:
+                genre = line[0]
+                subg = line[1]
+                maps = line[2:]
+                manual_mapping[f"{genre}/{subg}"] = [MusicBrainzGenre(name=m, is_genre='?', tag_count=0) for m in maps]
 
     print(f"got {len(mb_genres)} genres")
 
@@ -178,7 +205,7 @@ def main(genrefile, datafile, outfile=None):
     print(f"got {len(data_genres)} items from the datafile")
 
     t = time.monotonic()
-    genre_matches = threaded_match_genres(data_genres, mb_genres)
+    genre_matches = threaded_match_genres(data_genres, mb_genres, manual_mapping)
     e = time.monotonic()
     print(e - t)
 
@@ -205,23 +232,31 @@ def main(genrefile, datafile, outfile=None):
         exactmatch = get_match_for_matchtype(matches, MatchType.EXACT)
         fullmatch = get_match_for_matchtype(matches, MatchType.FULLGENRE)
         parentmatch = get_match_for_matchtype(matches, MatchType.PARENTGENRE)
-
-        for match in [subgenrematch, exactmatch, fullmatch, parentmatch]:
-            if match:
-                if match.match == 100:
-                    print(f"    {match.musicbrainz.name} g={match.musicbrainz.is_genre} t={match.match_type}")
-
-        # If this is the same match as the FULLGENRE match, don't show it
         tokenmatch = get_match_for_matchtype(matches, MatchType.TOKENSORT)
-        if tokenmatch:
-            if fullmatch is not None and tokenmatch.musicbrainz.name != fullmatch.musicbrainz.name and tokenmatch.match == 100:
-                print(
-                    f"    {tokenmatch.musicbrainz.name} g={tokenmatch.musicbrainz.is_genre} t={tokenmatch.match_type}")
+        mappings = [match for match in matches if match.match_type == MatchType.MANUAL]
+
+        if mappings:
+            for match in mappings:
+                print(f"    {match.musicbrainz.name} g={match.musicbrainz.is_genre} t={match.match_type}")
+        else:
+            for match in [subgenrematch, exactmatch, fullmatch, parentmatch]:
+                if match:
+                    if match.match == 100:
+                        print(f"    {match.musicbrainz.name} g={match.musicbrainz.is_genre} t={match.match_type}")
+
+            # If this is the same match as the FULLGENRE match, don't show it
+            if tokenmatch:
+                if fullmatch is not None and tokenmatch.musicbrainz.name != fullmatch.musicbrainz.name and tokenmatch.match == 100:
+                    print(
+                        f"    {tokenmatch.musicbrainz.name} g={tokenmatch.musicbrainz.is_genre} t={tokenmatch.match_type}")
 
         if w:
             sub = dataset_genre.subgenre
             row = [dataset_genre.parent_genre, sub if sub else ""]
-            if not sub and parentmatch and parentmatch.musicbrainz.is_genre:
+            if mappings:
+                for m in mappings:
+                    row += [m.musicbrainz.name, "manual", ""]
+            elif not sub and parentmatch and parentmatch.musicbrainz.is_genre:
                 # If there is no subgenre then only match the parent (if it's a genre)
                 row += [parentmatch.musicbrainz.name, "parent", ""]
             else:
@@ -279,7 +314,8 @@ def get_match_for_matchtype(matches: List[MatchResult], matchtype: MatchType) ->
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-o', required=False)
+    parser.add_argument('-m', required=False)
     parser.add_argument('genrefile')
     parser.add_argument('datafile')
     args = parser.parse_args()
-    main(args.genrefile, args.datafile, args.o)
+    main(args.genrefile, args.datafile, args.m, args.o)
