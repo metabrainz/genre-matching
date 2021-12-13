@@ -5,6 +5,7 @@ thefuzz[speedup]
 ipython==7.19.0
 ipython-genutils==0.2.0
 jedi==0.17.2
+musicbrainzngs==0.7.1
 parso==0.7.1
 pexpect==4.8.0
 pickleshare==0.7.5
