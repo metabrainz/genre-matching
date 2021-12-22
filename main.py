@@ -184,8 +184,10 @@ def main(genrefile, datafile, mappingfile=None, outfile=None):
             for line in r:
                 genre = line[0]
                 subg = line[1]
+                if subg:
+                    genre = f"{genre}/{subg}"
                 maps = line[2:]
-                manual_mapping[f"{genre}/{subg}"] = [MusicBrainzGenre(name=m, is_genre='?', tag_count=0) for m in maps]
+                manual_mapping[genre] = [MusicBrainzGenre(name=m, is_genre='?', tag_count=0) for m in maps]
 
     print(f"got {len(mb_genres)} genres")
 
