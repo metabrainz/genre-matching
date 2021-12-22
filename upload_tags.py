@@ -62,6 +62,11 @@ def main(tagtype, tagfile):
     chunk_count = 0
     numchunks = math.ceil(numtags/ITEMS_PER_CHUNK)
     for mbids in chunks(list(sorted(tags.keys())), ITEMS_PER_CHUNK):
+        stopfile = f"{tagfile}.stop"
+        if os.path.exists(stopfile):
+            print("Stopfile found, exiting")
+            return
+
         to_submit = {}
         for m in mbids:
             to_submit[m] = tags[m]
