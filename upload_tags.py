@@ -3,6 +3,7 @@
 import argparse
 import csv
 import json
+import math
 import os
 import time
 from datetime import timedelta
@@ -45,6 +46,7 @@ def chunks(lst, n):
 
 def main(tagtype, tagfile):
     submitted_items = load_submit_cache(tagfile)
+    submitted_set = set(submitted_items)
     with open(tagfile) as fp:
         reader = csv.reader(fp)
         tags = {}
@@ -52,25 +54,33 @@ def main(tagtype, tagfile):
             tags[line[0]] = line[1:]
 
         print(f"Loaded {len(tags)} tags")
-        tags = {k: v for k, v in tags.items() if k not in submitted_items}
+        tags = {k: v for k, v in tags.items() if k not in submitted_set}
         print(f"After filtering submitted items, {len(tags)} tags remaining")
 
     start = time.monotonic()
     numtags = len(tags)
     chunk_count = 0
-    tgs = list(sorted(tags.keys()))
-    for mbids in chunks(tgs[:10], ITEMS_PER_CHUNK):
+    numchunks = math.ceil(numtags/ITEMS_PER_CHUNK)
+    for mbids in chunks(list(sorted(tags.keys())), ITEMS_PER_CHUNK):
         to_submit = {}
         for m in mbids:
             to_submit[m] = tags[m]
         
         #print(to_submit)
-        musicbrainzngs.submit_tags(recording_tags=to_submit)
+        chunkstart = time.monotonic()
+        try:
+            musicbrainzngs.submit_tags(recording_tags=to_submit)
+            chunkend = time.monotonic()
+            print(f" ({round(chunkend-chunkstart, 2)})")
+            time.sleep(1)
 
-        submitted_items += mbids
-        save_submit_cache(tagfile, submitted_items)
-        chunk_count += 1
-        print_status_update(chunk_count, numtags, start)
+            submitted_items += mbids
+            save_submit_cache(tagfile, submitted_items)
+            chunk_count += 1
+            print_status_update(chunk_count, numchunks, start)
+        except musicbrainzngs.musicbrainz.ResponseError as e:
+            print(" - Error when processing", e.cause.reason, e.cause.headers)
+            pass
 
 
 def print_status_update(chunk_count, number_chunks, start_time):
