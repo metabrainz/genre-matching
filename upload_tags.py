@@ -10,13 +10,13 @@ from datetime import timedelta
 
 import musicbrainzngs
 
-musicbrainzngs.set_useragent("MB-Tagsubmit", "0.1", "Alastair")
+musicbrainzngs.set_useragent("MB-Tagsubmit", "0.1", "https://github.com/metabrainz/genre-matching")
 # We have a temporary limit exemption, so do up to 5 queries per second
 musicbrainzngs.set_rate_limit(1, 5)
 
 musicbrainzngs.set_hostname("test.musicbrainz.org", True)
 
-musicbrainzngs.auth('alastairp', 'mb')
+musicbrainzngs.auth('user', 'mb')
 
 
 ITEMS_PER_CHUNK = 25

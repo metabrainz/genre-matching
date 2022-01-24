@@ -1,7 +1,7 @@
 appnope==0.1.0
 backcall==0.2.0
 decorator==4.4.2
-thefuzz[speedup]
+thefuzz[speedup]==0.19.0
 ipython==7.19.0
 ipython-genutils==0.2.0
 jedi==0.17.2
